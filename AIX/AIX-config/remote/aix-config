@@ -1,0 +1,192 @@
+#!/bin/bsh
+# Script to install base services on IBM's AIX Systems
+#
+
+#start script with blank line
+echo
+#Define variables
+TEMPDIR='/var/tmp/install'
+REPOSITORY=''
+PACKAGE_DIR='files/OS/AIX/packages'
+USER=''
+PASSWD=''
+RootHome='/root'
+BashLoc=`which bash`
+SearchPath="$(echo $PATH | sed 's/:/ /g')"
+ftpServer=""
+
+# make directorys
+mkdir -p /var/log/aix-config
+
+# define functions
+
+install_ssl(){
+  #download OpenSSL
+	wget ftp://$REPOSITORY/${PACKAGE_DIR}/openssl*;
+		if [ "$?" != "0" ];then
+			echo "Fatal Error: WGET failed. Exiting";
+			exit 1;
+		fi
+
+	#uncompress and untar
+	uncompress `ls`;
+	tar -xvf `ls`;
+
+	#delete leftover tar file
+	rm *.tar;
+
+	# cd to ssl directory
+	cd openssl*;
+	#create table of contents
+	CPWD=`pwd`;
+	inutoc `pwd`;
+
+	#install files
+	installp -acgNXYe /var/log/aix-config/ssl -d $CPWD all;
+		if [ "$?" != "0" ];then
+			echo "Fatal Error: SSL install failed. Exiting";
+			exit 1;
+		fi
+
+	#move down a directory and delete the SSL directory
+	cd ..;
+	rm -rf *;
+}
+
+install_ssh(){
+	#download openssh for AIX from our server via wget
+	wget ftp://$REPOSITORY/${PACKAGE_DIR}/openssh-*;
+		if [ "$?" != "0" ];then
+			echo "Fatal Error: WGET failed. Exiting";
+			exit 1;
+		fi
+
+	#uncompress and untar the package
+	uncompress `ls`;
+	tar -xvf `ls`;
+	
+	#delete leftover tar file
+	rm *.tar;
+
+	#Create table of contents
+	CPWD=`pwd`;
+	inutoc `pwd`;
+
+	#install OpenSSH
+	installp -acgNXYe /var/log/aix-config/ssh -d $CPWD all;
+		if [ "$?" != "0" ];then
+			echo "Fatal Error: SSH install failed. Exiting";
+			exit 1;
+		fi
+}
+
+mkdir -p $TEMPDIR >/dev/null 2>&1
+
+cd $TEMPDIR
+
+if [ "`pwd`" = "$TEMPDIR" ];then
+	for i in `ls`; do rm -fr $i;done;
+	else echo "Fatal Error: Could not change directory"; exit 1;
+fi
+
+#to allow virtually unlimited file size ftp download
+echo "Changing root fsize permissions..."
+chuser fsize=-1 root
+ulimit -f unlimited
+
+echo "getting and installing files..."
+
+# update rpm
+if [ "`rpm -q rpm | awk '{FS="-";print $1}'`" != "rpm"  ]; then
+	rpm -i ftp://$REPOSITORY/${PACKAGE_DIR}/rpm.ppc.rpm
+	if [ "$?" != "0" ];then
+		echo "Fatal Error: RPM failed. Exiting";
+		exit 1;
+	fi
+fi
+
+#Install bash
+if [ "`rpm -q bash | awk '{FS="-";print $1}'`" != "bash" ]; then
+	rpm -i --hash ftp://$REPOSITORY/${PACKAGE_DIR}/bash.ppc.rpm
+        if [ "$?" != "0" ];then
+                echo "Fatal Error: RPM failed. Exiting";
+                exit 1;
+        fi
+	rpm -i --hash ftp://$REPOSITORY/${PACKAGE_DIR}/bash-doc.ppc.rpm
+        if [ "$?" != "0" ];then
+                echo "Fatal Error: RPM failed. Exiting";
+                exit 1;
+        fi
+fi
+
+#install wget via rpm
+if [ "`rpm -q wget | awk '{FS="-";print $1}'`" != "wget"  ]; then
+	rpm -i ftp://$REPOSITORY/${PACKAGE_DIR}/wget.ppc.rpm
+	if [ "$?" != "0" ];then
+		echo "Fatal Error: RPM failed. Exiting";
+		exit 1;
+	fi
+fi
+
+#install less via rpm
+if [ "`rpm -q less | awk '{FS="-";print $1}'`" != "less"  ]; then
+	rpm -i ftp://$REPOSITORY/${PACKAGE_DIR}/less.ppc.rpm
+	if [ "$?" != "0" ];then
+		echo "Fatal Error: RPM failed. Exiting";
+		exit 1;
+	fi
+fi
+
+installp -C >/dev/null 2>&1
+
+#check whether OpenSLL is installed
+lslpp -L | grep -i 'openssl.base' > /dev/null 2>&1
+if [ "$?" != "0" ];then 
+	install_ssl
+fi
+
+#check whether OpenSSH is installed
+lslpp -L | grep -i 'openssh.base' > /dev/null 2>&1
+if [ "$?" != "0" ];then 
+	install_ssh
+fi
+
+#delete the install dir
+cd /
+rm -rf $TEMPDIR
+
+# make sure the root home is ${RootHome}
+mkdir -p ${RootHome} >/dev/null 2>&1
+#usermod -d ${RootHome} root
+
+# set bash as the shell;${RootHome} as the root home path
+echo;echo bash location is $BashLoc;echo
+test "$(which bash)" != "no bash in $SearchPath" && (perl -pi -e "s|^root:(.):.*|root:\1:0:0:Super-User:$RootHome:${BashLoc}" -- /etc/passwd)
+
+cd ${RootHome}
+# remove the appropriate config files
+rm .bash*
+wget ftp://${ftpServer}/files/OS/AIX/config/*
+
+cd /
+
+echo "configuring settings...."
+# sed, sshd_config, allow root login via SSH
+#/usr/lpp/openssh.base/inst_root/etc/ssh/sshd_config
+if [ "`which ssh >dev/null;echo $?`" = "0" ];then
+	if [ "`which /etc/ssh/sshd_config >dev/null;echo $?`" = "/etc/ssh/sshd_config" ];then
+		if [ "`cat /etc/ssh/sshd_config | grep Root | head -n1`" != "PermitRootLogin yes" ];then
+			perl -pi -e 's:^.{0,1}PermitRootLogin \w*:PermitRootLogin yes:' -- /etc/ssh/sshd_config;
+		fi
+	fi
+	if [ "`lssrc -a | grep ssh | awk '{print $4}'`" != "active" ];then
+		startsrc -s sshd;
+	fi
+fi
+
+# after changing the shell to bash, we have to make some changes to allow ftp login, etc.
+test "$(cat /etc/security/login.cfg | grep shells | grep `which bash` >/dev/null;echo $?)" != "0" && (perl -pi -e "s|(shells = /bin/sh,.*)|\1,$BashLoc|" -- /etc/security/login.cfg;refresh -s inetd)
+nohup aix-motd >/dev/null 2>&1 &
+
+echo "Config done."
+exit 0
