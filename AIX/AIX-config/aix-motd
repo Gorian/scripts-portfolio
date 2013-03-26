@@ -1,0 +1,58 @@
+# Create the "Mesage of the Day" ( /etc/motd )
+#
+
+#functions
+greenWords(){
+  echo -e '\n\E[32;40m'"$1"'\E[39;49;00m\n';
+}
+subSectionHeading(){
+	echo -e '\n\E[1;36m'"$1"'\E[39;49;00m\n';
+}
+# variables
+SHORTNAME=$(hostname | awk '{FS="."; print $1}')
+#PRIMARY_INTERFACE=$(netstat -r | grep -i 'default' | awk '{print $6}')
+PRIMARY_INTERFACE=$(for i in $(ifconfig -l);do test "$(ifconfig $i | grep inet | awk '{print $2}')" = "$(lsconf 2>&1 | grep -i 'IP Address' | awk '{FS=": ";print $2}')" && (echo $i);done)
+motdtempfile="/var/tmp/motd-temp"
+companyName=""
+
+# empty the motd first
+cat /dev/null>${motdtempfile}
+
+# rewrite the motd
+cat >> ${motdtempfile} <<EOF
+
+>> ${companyName} owned server. Authorized use only<<
+
+System Info:
+              OS: AIX Version $(oslevel | awk '{FS=".";print $1"."$2}')
+        Hostname: $(hostname)
+        CPU Info: $(lsconf 2>&1 | grep 'Processor Type:' | awk '{FS=": ";print $2}')
+   System Memory: $(lsconf 2>&1 | grep 'Memory Size:' | awk '{FS=": ";print $2}' | head -n 1)
+
+Network Info:
+      IP Address: $(lsconf 2>&1 | grep -i 'IP Address' | awk '{FS=": ";print $2}')
+         Gateway: $(lsconf 2>&1 | grep -i 'Gateway' | awk '{FS=": ";print $2}')
+     MAC Address: $(entstat $PRIMARY_INTERFACE | grep -i 'hardware address' | awk '{FS=": ";print $2}'|tr '[a-z]' '[A-Z]')
+         Netmask: $(lsconf 2>&1 | grep -i 'netmask' | awk '{FS=": ";print $2}')
+     DNS servers: $(cat /etc/resolv.conf | grep 'nameserver' | awk '{print $2}' | sed -n '1,1p')
+                  $(cat /etc/resolv.conf | grep 'nameserver' | awk '{print $2}' | sed -n '2,2p')
+				  
+Other:
+            WWNs:$( lscfg -vl fcs0 2>/dev/null | grep 'Network Address' | sed 's/\./ /g' | awk '{print $3}' | sed 's/\(..\)/\1:/g' | sed 's/:$//')
+                 $( lscfg -vl fcs1 2>/dev/null | grep 'Network Address' | sed 's/\./ /g' | awk '{print $3}' | sed 's/\(..\)/\1:/g' | sed 's/:$//')
+
+
+=> Do not use this system without a valid reservation!! <=
+
+=> SymResource
+** http://symresource.engba.symantec.com **
+
+=> System imaged and maintained by Global Support Labs
+** http://gsl.symantec.com **
+
+==============================================================================================================================================
+
+EOF
+
+#finalize the motd
+mv ${motdtempfile} /etc/motd
