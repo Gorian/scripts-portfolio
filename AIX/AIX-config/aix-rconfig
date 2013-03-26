@@ -1,0 +1,75 @@
+#!/bin/bash
+#
+# Remote AIX configuration
+#
+
+# Arguments:
+# Argument 1 - Hostname (FQDN) or IP address
+
+# Variables
+HOST=$1
+USER="root"
+PASSWD=""
+# local script directory (in this case, all scripts to be pushed will be located in /files/scripts/remote)
+lscriptDir="/files/scripts/remote"
+# remote script directory (where scripts will be run from the host)
+rscriptDir="/usr/bin"
+# The prompt to "expect" with the expect command
+PROMPT='#'
+BashLoc=`which bash`
+SearchPath="$(echo $PATH | sed 's/:/ /g')"
+
+# Make sure there is no FTP transfer limit on remote system
+
+expect <<EOF
+spawn telnet $HOST
+expect "login:"
+send "$USER\r"
+expect "$USER's Password:"
+send "$PASSWD\r"
+expect "*#"
+send "PS1=#\r"
+expect "$PROMPT"
+send "chuser fsize=-1 root\r"
+expect  "$PROMPT"
+send "ulimit -f unlimited\r"
+expect "$PROMPT"
+send "cd $rscriptDir\r"
+expect "$PROMPT"
+send "rm -f aix-*\r"
+expect "$PROMPT"
+send "sleep 2\r"
+EOF
+echo
+# ftp the AIX scripts
+
+cd $lscriptDir # move to the local scrip directory, to ftp from
+
+ftp -ni <<EOF
+open $HOST
+user $USER $PASSWD
+cd $rscriptDir
+mput aix-*
+bye
+EOF
+
+# run the config script
+expect <<EOF
+spawn telnet $HOST
+expect "login:"
+send "$USER\r"
+expect "$USER's Password:"
+send "$PASSWD\r"
+expect "*#"
+send "PS1=#\r"
+expect "$PROMPT"
+send "cd $rscriptDir\r"
+expect "$PROMPT"
+send "chmod 777 aix-*\r"
+expect "$PROMPT"
+send "./aix-config\r"
+expect -timeout 60000 "Config done."
+sleep 5
+EOF
+
+#EOF
