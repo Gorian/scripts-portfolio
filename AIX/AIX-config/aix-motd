@@ -42,14 +42,6 @@ Other:
                  $( lscfg -vl fcs1 2>/dev/null | grep 'Network Address' | sed 's/\./ /g' | awk '{print $3}' | sed 's/\(..\)/\1:/g' | sed 's/:$//')
 
 
-=> Do not use this system without a valid reservation!! <=
-
-=> SymResource
-** http://symresource.engba.symantec.com **
-
-=> System imaged and maintained by Global Support Labs
-** http://gsl.symantec.com **
-
 ==============================================================================================================================================
 
 EOF
