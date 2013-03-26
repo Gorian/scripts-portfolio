@@ -1,0 +1,149 @@
+#!/usr/bin/bash
+#
+# Bash script to automate the patching of AIX
+#
+
+#Define Variables
+help=0
+ftpserver='' # enter the server hosting the files via ftp here
+ftpuser='' # user to login as to ftp server
+ftppass='' # password for ftp user
+ftpdir='/files/OS/AIX/patches'
+patch=$1
+patchdir1='/usr/sys/inst.images/installp'
+patchdir2='/usr/sys/inst.images/installp/ppc'
+ilog='/var/tmp/installp.log'
+nfsmount='/mnt'
+basefile='bos.iocp-6.1.0.0'
+# size of patch;set later
+psize=0
+# free space on disk;set later
+fsize=0
+# difference of space
+difference=0
+# final result
+result=0
+
+# functions
+
+pause(){
+  read -p "Press any key to continue...";
+}
+
+#help(){
+#
+#}
+# set whether local or not
+nfsresult=`echo "$2" | awk '{FS="=";print $2}'`
+
+if [ "$nfsresult" != "yes" ];then
+	usenfs="0";
+else
+	usenfs="1";
+fi
+
+echo -e '\n\E[31;40m'"Warning! This will delete everyhing in the $patchdir2 directory! "'\E[39;49;00m\n'
+pause
+
+# to allow virtually unlimited file size ftp download
+echo -e "\nSetting filesize limit..."
+chuser fsize=-1 root
+ulimit -f unlimited
+
+#make directory for patches if not there.
+echo -e "\nChecking for patch directories...."
+mkdir -p $patchdir1 >/dev/null 2>&1
+mkdir -p $patchdir2 >/dev/null 2>&1
+
+#switch to patch directory
+cd $patchdir2
+
+#delete anything already in directory
+echo -e "\nClearing patch directory..."
+#rm .toc >/dev/null
+rm -rf * >/dev/null
+
+# mount server nfs if nfs is selected
+if [ "$usenfs" = "1" ];then
+	echo -e "\nMounting ftp server...";
+	mkdir -p $nfsmount >/dev/null 2>&1;
+	nfso -o nfs_use_reserved_ports=1;
+	mount -o ro ${ftpserver}:/files /$nfsmount;
+	# make sure there is a enough room
+	cd $nfsmount/OS/AIX/patches;
+	pnum=$(du -k $patch.tar.bz2 | awk '{print $1}'); # patch file size
+else # use ssh to get info
+	pnum=`ssh ${ftpuser}@${ftpserver} "cd /files/OS/AIX/patches;du -k $patch.tar.bz2" | awk '{print $1}';`
+fi
+
+fnum=$(df -k | grep '/usr' | awk '{print $3}'); # free space
+unum=$({ echo "$pnum * 2"; } | bc -l); # estimated uncompressed size
+
+if [ "$unum" \> "$fnum" ];then
+	echo -e "\ncalculating space needed and expanding file system...";
+	result=$( { echo "$unum - $fnum"; } | bc -l);
+	size=$({ echo "$result * 2"; } | bc -l); # multiply the size by 2, as chfs used 512 blocks
+	size=$({ echo "scale=0;$size/1"; } | bc ); # round the number to the nearest whole integer
+	chfs -a size=+$size /usr;
+fi
+
+#switch back to patch directory
+cd $patchdir2
+
+#make sure that bunzip is installed
+if [ "`which bzcat >/dev/null;echo $?`" != "0" ]; then
+	echo -e "\nInstalling bunzip2..."
+	rpm -i 'ftp://${ftpserver}/OS/AIX/packages/bzip2-*';
+	if [ "$?" != "0" ];then
+		echo "Fatal Error: RPM Failed";
+		exit 1;
+	fi
+fi
+
+installp -C >/dev/null 2>&1
+
+# install bos.iocp-6.1.0.0
+echo -e "\nGetting $basefile..."
+wget -q "ftp://${ftpserver}/${ftpdir}/$basefile"
+if [ "$?" != "0" ];then
+	echo "Fatal Error: File Transfer Failed";
+	exit 1;
+fi
+installp -acgNXYd $PWD all
+rm $patchdir2/$basefile
+
+#uncompress and untar the patch files (the directory should be empty except for the tarball you downloaded)
+echo -e "\nGetting patch..."
+wget -qO - "ftp://${ftpserver}/${ftpdir}/${patch}.tar.bz2" | cat | bzcat | tar -xvf -
+if [ "$?" != "0" ];then
+	echo "Fatal Error: File Transfer Failed";
+	exit 1;
+fi
+
+
+# if [ "`oslevel -s | awk '{FS="-";print $1}'`" == "5300" ];then
+#	tar -xcf `ls`;
+#	else tar -xvf `ls`;
+# fi
+
+#after uncompression, delete the local copy of the tarball
+rm *.tar.bz2 >/dev/null
+#create table of contents, for patching with smit
+inutoc `pwd`
+
+#create log for install
+echo -e "\nCreating log\n"
+touch $ilog
+#smit command (automated)
+installp -acgNXYe $ilog -d $patchdir2 all
+install_all_updates -vY -d $patchdir
+#check to see if oslevel -s == determined patch level
+if [ "`oslevel -s`" == "$patch" ];then
+	echo -e '\n\E[32;40m'"Result = SUCCESS"'\E[39;49;00m\n';
+	else echo -e '\n\E[31;40m'"Result = FAILURE"'\E[39;49;00m\n';
+fi
+
+umount $nfsmount
+
+echo -e "\nYou may need to reboot the system."
+#EOF
