@@ -1,0 +1,96 @@
+# --------------------------------------------------------
+#!/bin/bash
+# graylog2-server daemon
+# chkconfig: 345 20 80
+# description: graylog2-server daemon
+# processname: graylog2-server
+# --------------------------------------------------------
+
+# Variables
+NAME='graylog2-server' # Server handle for the screen session
+USER='root'        # User that this will be running under.
+DIR='/srv/graylog2-server'
+PWD=`pwd`
+CMD="${DIR}/bin/graylog2ctl"
+RETVAL=0
+
+service_start(){
+	# start the service
+	if [ "$(${CMD} status)" = "graylog2-server not running" ]; then
+		echo "Starting ${NAME}...";
+		${CMD} start >/dev/null 2>&1;
+		if [ $? = 0 ]; then
+			echo "${NAME} started.";
+		else
+			echo "fatal error ecountered attempting to start ${NAME}. Exiting.";
+			exit 1;
+		fi
+	else
+		echo "${NAME} is already running";
+	fi
+}
+
+service_restart(){
+	# restart the service
+	if [ "$(${CMD} status)" = "graylog2-server not running" ]; then
+		echo "${NAME} is not running.";
+	else
+		echo "Restarting ${NAME}...";
+		${CMD} stop ;
+		if [ $? = 0 ]; then
+			echo "${NAME} stopped.";
+		fi
+		echo "Starting ${NAME}...";
+		${CMD} start >/dev/null 2>&1;
+		if [ $? = 0 ]; then
+			echo "${NAME} started.";
+		else
+			echo "fatal error ecountered attempting to start ${NAME}. Exiting.";
+			exit 1;
+		fi
+	fi
+}
+
+service_stop() {
+	# stop the service
+	if [ "$(${CMD} status)" = "graylog2-server not running" ]; then
+		echo "${NAME} is not running";
+	else
+		${CMD} stop;
+		if [ $? = 0 ]; then
+			echo "${NAME} stopped.";
+		else
+			echo "Fatal error encountered attempting to stop ${NAME}.";
+			exit 1;
+		fi
+	fi
+}
+
+service_status(){
+	# get the status of the service
+	${CMD} status;
+}
+
+case "$1" in
+	"start")
+		service_start
+		exit 0
+		;;
+	"stop")
+		service_stop
+		exit 0
+		;;
+	"restart")
+		service_restart
+		exit 0
+		;;
+	"status")
+		service_status
+		exit 0
+		;;
+	*)
+		echo "Usage ${0##*/} start|stop|restart|status"
+		exit 2
+		;;
+esac
+# --------------------------------------------------------
